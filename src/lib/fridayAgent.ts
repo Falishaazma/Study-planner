@@ -1,48 +1,62 @@
-import { GoogleGenAI } from '@google/genai';
-import { PlayerStats, Quest } from '../types';
+export interface Message {
+  role: "user" | "model" | "system";
+  content: string;
+}
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
-});
+export async function askFriday(prompt: string, history: Message[] = []): Promise<string> {
+  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
-const FRIDAY_SYSTEM_PROMPT = `
-You are F.R.I.D.A.Y., a tactical, witty, ultra-competent artificial intelligence persona modeled directly after Tony Stark's onboard assistant. 
-You address the user as "Boss". 
+  if (!apiKey || apiKey.trim() === "") {
+    return "Tactical link degraded, Boss. Gemini API key is missing. Please ensure NEXT_PUBLIC_GEMINI_API_KEY is configured in your GitHub Repository Secrets.";
+  }
 
-Your core duties:
-1. Keep Boss locked in on high-yield MBBS targets (Pharmacology, Pathology, Microbiology, Forensic Medicine).
-2. Monitor screen-time breaches and dopamine degradation with sharp, lighthearted tactical banter.
-3. Keep responses concise, punchy, HUD-ready (under 3-4 sentences), and formatted cleanly.
-`;
+  const systemInstruction = `You are F.R.I.D.A.Y., a high-precision medical study protocol and cognitive AI tactical assistant for a top medical student. Respond concisely, sharply, and supportively. Address the user as 'Boss'.`;
 
-export async function askFriday(
-  prompt: string,
-  stats: PlayerStats,
-  quests: Quest[]
-): Promise<string> {
-  const context = `
-[CURRENT SUIT TELEMETRY]
-- Operator Level: ${stats.level} (XP: ${stats.xp}/${stats.xpToNextLevel})
-- Armor Integrity: ${stats.suitIntegrity}%
-- Dopamine Shield: ${stats.dopamineShield}%
-- Locked Focus Today: ${stats.focusMinutesToday} mins
-- Active Quests: ${quests.filter(q => !q.completed).map(q => q.title).join(', ')}
-- Breach Alerts: ${stats.distractionPenaltyCount}
-
-Boss Request: "${prompt}"
-`;
+  const contents = [
+    ...history.map((msg) => ({
+      role: msg.role === "user" ? "user" : "model",
+      parts: [{ text: msg.content }],
+    })),
+    {
+      role: "user",
+      parts: [{ text: prompt }],
+    },
+  ];
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        { role: 'user', parts: [{ text: `${FRIDAY_SYSTEM_PROMPT}\n\n${context}` }] }
-      ]
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: systemInstruction }],
+          },
+          contents: contents,
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 800,
+          },
+        }),
+      }
+    );
 
-    return response.text || "Systems are online, Boss. Awaiting your next directive.";
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return `Neural link interference detected (${response.status}): ${
+        errorData.error?.message || "Tactical systems offline."
+      }`;
+    }
+
+    const data = await response.json();
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    return reply || "Diagnostics received empty telemetry, Boss. Standing by.";
   } catch (error) {
-    console.error('FRIDAY Core Link Failure:', error);
-    return "Tactical link degraded, Boss. Ensure your Gemini API key is configured in Vercel settings.";
+    return "Neural link failed to establish connection. Check your network or API status.";
   }
 }
+
