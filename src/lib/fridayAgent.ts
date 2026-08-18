@@ -1,88 +1,66 @@
-export interface Message {
-  role: "user" | "model" | "system";
-  content: string;
-}
+import { PlayerStats, Quest } from '../types';
+
+const GROQ_API_KEY = process.env.NEXT_PUBLIC_GROQ_API_KEY || '';
+
+const FRIDAY_SYSTEM_PROMPT = `
+You are F.R.I.D.A.Y., a tactical, witty, ultra-competent artificial intelligence persona modeled directly after Tony Stark's onboard assistant. 
+You address the user as "Boss". 
+
+Your core duties:
+1. Keep Boss locked in on high-yield MBBS targets (Pharmacology, Pathology, Microbiology, Forensic Medicine).
+2. Monitor screen-time breaches and dopamine degradation with sharp, lighthearted tactical banter.
+3. Keep responses concise, punchy, HUD-ready (under 3-4 sentences), and formatted cleanly.
+`;
 
 export async function askFriday(
   prompt: string,
-  stats?: any,
-  quests?: any,
-  history: Message[] = []
+  stats: PlayerStats,
+  quests: Quest[]
 ): Promise<string> {
-  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  const context = `
+[CURRENT SUIT TELEMETRY]
+- Operator Level: ${stats.level} (XP: ${stats.xp}/${stats.xpToNextLevel})
+- Armor Integrity: ${stats.suitIntegrity}%
+- Dopamine Shield: ${stats.dopamineShield}%
+- Locked Focus Today: ${stats.focusMinutesToday} mins
+- Active Quests: ${quests.filter((q) => !q.completed).map((q) => q.title).join(', ')}
+- Breach Alerts: ${stats.distractionPenaltyCount}
 
-  if (!apiKey || apiKey.trim() === "") {
-    return "Tactical link degraded, Boss. Gemini API key is missing. Please ensure NEXT_PUBLIC_GEMINI_API_KEY is configured in your GitHub Repository Secrets.";
+Boss Request: "${prompt}"
+`;
+
+  if (!GROQ_API_KEY) {
+    return "Groq link degraded, Boss. Ensure your NEXT_PUBLIC_GROQ_API_KEY is configured.";
   }
-
-  // Format telemetry and active quests into context
-  let contextTelemetry = "";
-  if (stats) {
-    contextTelemetry += `\n[ACTIVE TELEMETRY / STATS]: ${typeof stats === "object" ? JSON.stringify(stats) : stats}`;
-  }
-  if (quests) {
-    contextTelemetry += `\n[ACTIVE BATTLE QUESTS]: ${typeof quests === "object" ? JSON.stringify(quests) : quests}`;
-  }
-
-  const systemInstruction = `You are F.R.I.D.A.Y., a tactical medical study assistant and cognitive AI for a top medical student. Address the user as 'Boss'. Be sharp, encouraging, concise, and tactical. Use the active battle quests and focus telemetry to guide the student's study objectives.`;
-
-  // Build message sequence compatible with the v1 endpoint
-  const contents = [
-    {
-      role: "user",
-      parts: [{ text: `[SYSTEM PROTOCOL]: ${systemInstruction}` }],
-    },
-    {
-      role: "model",
-      parts: [{ text: "Neural link established. Ready for orders, Boss." }],
-    },
-    ...history.map((msg) => ({
-      role: msg.role === "user" ? "user" : "model",
-      parts: [{ text: msg.content }],
-    })),
-    {
-      role: "user",
-      parts: [
-        {
-          text: contextTelemetry
-            ? `${contextTelemetry}\n\n[USER COMMAND]: ${prompt}`
-            : prompt,
-        },
-      ],
-    },
-  ];
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: contents,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 800,
-          },
-        }),
-      }
-    );
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: FRIDAY_SYSTEM_PROMPT },
+          { role: 'user', content: context },
+        ],
+        temperature: 0.7,
+        max_tokens: 300,
+      }),
+    });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return `Neural link interference (${response.status}): ${
-        errorData.error?.message || "Tactical systems offline."
-      }`;
+      const errorData = await response.json();
+      console.error('Groq API Error:', errorData);
+      return `Telemetry error from Groq: ${errorData?.error?.message || response.statusText}`;
     }
 
     const data = await response.json();
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    return reply || "Diagnostics received empty telemetry, Boss. Standing by.";
+    return data.choices?.[0]?.message?.content || "Systems are online, Boss. Awaiting your next directive.";
   } catch (error) {
-    return "Neural link failed to establish connection. Check network status.";
+    console.error('FRIDAY Groq Link Failure:', error);
+    return "Tactical link degraded, Boss. Unable to reach Groq servers.";
   }
 }
-
